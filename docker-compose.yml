@@ -1,0 +1,20 @@
+services:
+  maps-scraper:
+    build: .
+    container_name: maps-scraper
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    # Simulates Render's free-tier ceiling locally so you catch memory
+    # problems on your own machine instead of in production.
+    mem_limit: 512m
+    shm_size: "1gb"
+    networks:
+      - n8n_shared
+
+networks:
+  n8n_shared:
+    external: true
+    name: n8n_data_oss_demo

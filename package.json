@@ -1,0 +1,21 @@
+{
+  "name": "maps-scraper",
+  "version": "1.1.0",
+  "description": "Headless-browser Google Maps lead scraper (business name, website, email) with human-like behavior, served over an HTTP API for n8n. Tuned for 512MB/1vCPU free-tier hosting (Render free plan).",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "puppeteer-core": "^22.15.0",
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5",
+    "p-queue": "^7.4.1"
+  }
+}

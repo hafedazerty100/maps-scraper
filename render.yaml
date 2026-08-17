@@ -1,0 +1,35 @@
+# Optional: Render "Blueprint" file. If you connect this repo on Render and
+# choose "New > Blueprint" instead of "New > Web Service", Render reads this
+# file and creates the service with all these settings pre-filled — you'll
+# still need to fill in API_KEY yourself (marked sync: false = secret,
+# entered manually in the dashboard, never committed to git).
+#
+# This is entirely optional — the README's manual dashboard steps do the
+# exact same thing by hand if you'd rather not use a Blueprint.
+
+services:
+  - type: web
+    name: maps-scraper
+    env: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: HEADLESS
+        value: true
+      - key: MAX_CONCURRENCY
+        value: 1
+      - key: CHROME_SINGLE_PROCESS
+        value: true
+      - key: RENDERER_HEAP_MB
+        value: 256
+      - key: JOB_TIMEOUT_MS
+        value: 100000
+      - key: DEFAULT_LIMIT
+        value: 10
+      - key: MAX_LIMIT
+        value: 25
+      - key: PROXY_SERVER
+        value: ""
