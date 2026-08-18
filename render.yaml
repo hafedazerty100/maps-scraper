@@ -26,10 +26,14 @@ services:
       - key: RENDERER_HEAP_MB
         value: 256
       - key: JOB_TIMEOUT_MS
-        value: 100000
+        value: 120000
+      - key: FIND_EMAIL_BUDGET_MS
+        value: 35000
       - key: DEFAULT_LIMIT
-        value: 10
+        value: 15
       - key: MAX_LIMIT
-        value: 25
+        value: 40
+      - key: MAPS_LANG
+        value: en
       - key: PROXY_SERVER
         value: ""

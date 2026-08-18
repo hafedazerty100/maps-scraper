@@ -5,6 +5,23 @@ const { extractEmailsFromHtml } = require('./emailFinder');
 const FEED_SELECTOR = 'div[role="feed"]';
 const RESULT_LINK_SELECTOR = 'a.hfpxzc'; // anchor wrapping each result card
 
+// When you search manually on Maps, the results you see depend on your
+// browser's own locale — not a forced language. MAPS_LANG lets you set
+// (or unset, via an empty value) the `hl` param to control that instead of
+// silently hardcoding English on every search. Left unset entirely, Maps
+// falls back to whatever the page's Accept-Language header implies (see
+// newStealthPage in browser.js) — closer to what you'd actually see
+// searching by hand from your own location/browser.
+const MAPS_LANG = process.env.MAPS_LANG !== undefined ? process.env.MAPS_LANG.trim() : 'en';
+
+// Builds the same deep-link URL Google Maps itself generates for a search —
+// this is what makes a scrape of `query` return the same results page as
+// typing `query` into Maps and hitting enter.
+function buildMapsSearchUrl(query) {
+  const base = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+  return MAPS_LANG ? `${base}?hl=${encodeURIComponent(MAPS_LANG)}` : base;
+}
+
 // Google shows a cookie/consent wall on first visit in many regions.
 // Try a handful of button texts across locales; ignore failure if absent.
 async function acceptConsentIfPresent(page) {
@@ -91,7 +108,7 @@ async function searchGoogleMaps(browser, query, limit, excludeUrls = []) {
   const results = [];
 
   try {
-    const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}?hl=en`;
+    const url = buildMapsSearchUrl(query);
     // NOT 'networkidle2': Google Maps is a heavy SPA that keeps background
     // connections alive continuously (live traffic, tile loading,
     // telemetry) — it can genuinely never go network-idle, so that wait
@@ -202,7 +219,7 @@ async function searchGoogleMapsUrlsOnly(browser, query, limit, excludeUrls = [])
   const results = [];
 
   try {
-    const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}?hl=en`;
+    const url = buildMapsSearchUrl(query);
     // See the identical comment in searchGoogleMaps() above — Maps never
     // reliably reaches 'networkidle2', so use 'domcontentloaded' + an
     // explicit feed-selector wait instead.
@@ -213,7 +230,16 @@ async function searchGoogleMapsUrlsOnly(browser, query, limit, excludeUrls = [])
     await page.waitForSelector(FEED_SELECTOR, { timeout: 30000 }).catch(() => {});
 
     let processedCount = 0;
-    const MAX_SCAN = Math.min(Math.max(limit * 5, 40), 80);
+    // This search-only pass never opens a detail pane or visits a website —
+    // it just reads each card's own href, which is cheap. So unlike the
+    // (now-unused-by-default) full-detail searchGoogleMaps() above, there's
+    // no real memory reason to cut the scan short. This ceiling exists only
+    // as a runaway-loop safety net, set generously above Google Maps' own
+    // practical result ceiling (it rarely loads much past ~120 cards for a
+    // single query before its own feed simply stops growing), so that in
+    // normal operation this scans as far as a human scrolling to the bottom
+    // would — not an arbitrary earlier cutoff.
+    const MAX_SCAN = Math.min(Math.max(limit * 6, 60), 150);
 
     while (results.length < limit && processedCount < MAX_SCAN) {
       await scrollResultsFeed(page, FEED_SELECTOR, { desiredCount: processedCount + 10 });

@@ -16,7 +16,27 @@ const BLOCKLIST_PATTERNS = [
   /^(no-?reply|donotreply)@/i,
 ];
 
-const CANDIDATE_PATHS = ['', '/contact', '/contact-us', '/contactus', '/about', '/about-us'];
+// Trimmed from 6 candidate paths to 4 — '/contactus' and '/about-us' were
+// largely redundant with '/contact-us' and '/about', and every extra path
+// is extra worst-case time (see FIND_EMAIL_BUDGET_MS below).
+const CANDIDATE_PATHS = ['', '/contact', '/contact-us', '/about'];
+
+// Per-path navigation timeout. Lowered from 12000ms: domcontentloaded is
+// all we actually need (we only read HTML/mailto links, nothing that
+// requires the page to fully render), so a genuinely slow/unresponsive
+// site should fail fast rather than eat a long timeout.
+const PER_PATH_TIMEOUT_MS = 8000;
+
+// Hard ceiling on TOTAL time findEmail is allowed to spend across ALL
+// candidate paths combined. Without this, a per-path timeout alone doesn't
+// bound the worst case — 4 paths x 8s = 32s is fine, but on Render's
+// throttled CPU even "fast" operations can run long, and a site that hangs
+// (rather than cleanly failing) on every path could still add up. This
+// budget is the real guarantee that findEmail can never single-handedly
+// blow through JOB_TIMEOUT_MS (100s default): it leaves generous headroom
+// for the Maps page load + consent handling that happens before findEmail
+// is ever called (see mapsScraper.js).
+const FIND_EMAIL_BUDGET_MS = parseInt(process.env.FIND_EMAIL_BUDGET_MS || '35000', 10);
 
 function extractEmailsFromHtml(html) {
   const matches = html.match(EMAIL_REGEX) || [];
@@ -55,12 +75,17 @@ async function findEmail(browser, websiteUrl) {
 
   const page = await newStealthPage(browser);
   const foundEmails = new Set();
+  const startedAt = Date.now();
 
   try {
     for (const path of CANDIDATE_PATHS) {
+      if (Date.now() - startedAt >= FIND_EMAIL_BUDGET_MS) {
+        break; // over budget — stop trying further paths, return whatever we have
+      }
+
       const targetUrl = path ? `${baseUrl.origin}${path}` : baseUrl.origin;
       try {
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: PER_PATH_TIMEOUT_MS });
         await randomDelay(300, 700);
 
         const html = await page.content();

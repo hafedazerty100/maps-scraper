@@ -60,7 +60,12 @@ async function humanClick(page, elementHandle) {
 // Scroll Google Maps' results feed panel gradually (like a real user reading
 // down the list) instead of jumping straight to the bottom. Stops once no
 // new results load after a few tries, or the desired count is reached.
-async function scrollResultsFeed(page, feedSelector, { desiredCount, maxIdleRounds = 3 }) {
+// maxIdleRounds default raised from 3 to 4: this only runs during the
+// lightweight, detail-pane-free search phase now, so being a bit more
+// patient before concluding "no more results" costs very little and means
+// we're less likely to give up on a slow-loading batch before Maps was
+// actually done — matching what a human patiently scrolling would see.
+async function scrollResultsFeed(page, feedSelector, { desiredCount, maxIdleRounds = 4 }) {
   let previousCount = 0;
   let idleRounds = 0;
 

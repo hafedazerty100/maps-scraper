@@ -169,6 +169,59 @@ to the slowdown. The near-zero `--disk-cache-size` flags plus
 after every job (added last round) achieve the same "nothing cached, ever"
 outcome without that specific risk.
 
+### Update — matching real manual-search results
+
+Two things in the search logic worked against getting the exact same
+results you'd see searching Maps by hand:
+
+1. **Language was hardcoded to English** (`?hl=en` on every request).
+   Searching manually, Maps uses your browser's own locale — forcing
+   English could return a different result set/ordering than what you'd
+   actually see. Now controlled by a `MAPS_LANG` env var: keep the default
+   `en` for predictable selector behavior, set it to your own locale
+   (`fr`, `ar`, ...) to match more closely, or leave it **empty** to drop
+   the `hl` param entirely and let Maps infer language from the request's
+   `Accept-Language` header instead — closest to genuine manual-search
+   behavior.
+2. **`MAX_SCAN` was capping how far the feed gets scrolled**, a leftover
+   from when this endpoint opened a detail pane per business. Since
+   `/scrape-leads` only reads each card's `href` now (see the "search then
+   enrich" split above), scanning further is cheap — raised the ceiling
+   significantly (and gave the scroll loop a bit more patience before
+   concluding "no more results") so it scans as far as a human scrolling to
+   the bottom would, not an arbitrary earlier cutoff.
+
+Both search functions now build their request URL through one shared
+`buildMapsSearchUrl()` helper — the same deep-link format
+(`https://www.google.com/maps/search/<query>`) Google Maps itself generates
+for any search, so a given `query` string reliably lands on the same
+results page whether you typed it or the scraper did.
+
+### Update — fixed `/enrich-lead` timing out at 100s
+
+`/enrich-lead`'s worst case wasn't actually bounded tightly enough:
+`findEmail()` tried up to 6 candidate pages on a business's website, each
+with its own 12s navigation timeout — worst case **72 seconds** on email
+lookup alone, on top of the Maps page load itself. On Render's throttled
+CPU, a single slow/unresponsive business website could burn its timeout on
+every candidate path and push the whole job past the 100s ceiling.
+
+Fixed:
+- **`findEmail()` now has an overall time budget** (`FIND_EMAIL_BUDGET_MS`,
+  default 35s) across *all* candidate paths combined, not just a per-path
+  timeout — this is what actually bounds the worst case now, rather than
+  hoping every individual page load stays fast.
+- Trimmed candidate paths from 6 to 4 (`/contactus` and `/about-us` were
+  largely redundant with `/contact-us` and `/about`) and lowered the
+  per-path timeout from 12s to 8s, since only `domcontentloaded` is needed.
+- **`JOB_TIMEOUT_MS` raised from 100s to 120s** to give real headroom above
+  the new worst case (~90s) instead of running right at the edge.
+
+If you already deployed the previous version, update your Render env vars
+to match the new `.env` (`JOB_TIMEOUT_MS=120000`, new
+`FIND_EMAIL_BUDGET_MS=35000`), and raise your n8n HTTP node's timeout to
+**160000ms** to match.
+
 **Be realistic about the hardware.** 512MB/1 shared vCPU is genuinely tight
 for running a full Chromium browser. These fixes make the service *reliable*
 (it will never again get stuck in a broken state) and meaningfully *faster*
@@ -219,9 +272,11 @@ add every variable from `.env.example` in this project. The important ones:
 | `MAX_CONCURRENCY` | `1` |
 | `CHROME_SINGLE_PROCESS` | `true` |
 | `RENDERER_HEAP_MB` | `256` |
-| `JOB_TIMEOUT_MS` | `100000` |
-| `DEFAULT_LIMIT` | `10` |
-| `MAX_LIMIT` | `25` |
+| `JOB_TIMEOUT_MS` | `120000` |
+| `FIND_EMAIL_BUDGET_MS` | `35000` |
+| `DEFAULT_LIMIT` | `15` |
+| `MAX_LIMIT` | `40` |
+| `MAPS_LANG` | `en` (or your own locale, or empty — see `.env` comments) |
 | `PROXY_SERVER` | leave empty unless you have one |
 
 Do **not** set `PORT` — Render injects its own and this app already reads
@@ -335,11 +390,11 @@ Use an **HTTP Request** node:
     "excludeUrls": {{ $json.previousMapsUrls }}
   }
   ```
-- **Settings → Timeout**: set to **150000ms (150s)** — this must be *higher*
-  than `JOB_TIMEOUT_MS` (100000ms) on the server so n8n never gives up before
+- **Settings → Timeout**: set to **160000ms (160s)** — this must be *higher*
+  than `JOB_TIMEOUT_MS` (120000ms) on the server so n8n never gives up before
   the server itself has had a chance to time out and respond. The server now
   always responds within `JOB_TIMEOUT_MS` + a few seconds (see the cleanup
-  fix above), so 150s gives comfortable margin without you needing to set
+  fix above), so 160s gives comfortable margin without you needing to set
   5-minute waits like before.
 
 ### For very large totals, page through with excludeUrls
@@ -388,9 +443,12 @@ Render's environment variables. Check for trailing spaces/typos.
 **First request after idle is very slow (~30-60s+)** → normal Render free
 cold start, not a bug. Consider the UptimeRobot keep-warm trick above.
 
-**Job fails with `"Job exceeded 100000ms timeout"`** → the query is too
-broad/slow for the free CPU. Lower `limit`, or raise `JOB_TIMEOUT_MS`
-(remembering to raise n8n's node timeout to match).
+**Job fails with `"Job exceeded 120000ms timeout"`** → for `/scrape-leads`,
+the query is too broad/slow for the free CPU — lower `limit`. For
+`/enrich-lead`, that business's website is unusually slow across every
+candidate page — lower `FIND_EMAIL_BUDGET_MS` to fail faster and move on
+rather than raising `JOB_TIMEOUT_MS` (remembering to raise n8n's node
+timeout to match if you do raise it).
 
 **Check `/health`'s `memoryMB.rss` right after a scrape** — if it's
 regularly near 450-500, you're at the ceiling. Lower `MAX_LIMIT` and
